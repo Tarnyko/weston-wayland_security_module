@@ -5487,6 +5487,12 @@ map(struct desktop_shell *shell, struct shell_surface *shsurf,
 {
 	struct weston_compositor *compositor = shell->compositor;
 	struct weston_seat *seat;
+	struct weston_client *weston_client;
+	struct weston_surface *surface;
+	struct workspace *ws;
+	struct focus_state *state;
+	struct wl_client *client;
+	uint32_t time;
 
 	/* initial positioning, see also configure() */
 	switch (shsurf->type) {
@@ -5536,8 +5542,36 @@ map(struct desktop_shell *shell, struct shell_surface *shsurf,
 			break;
 		if (shell->locked)
 			break;
+		/* if nothing is focused, or a surface belonging to the *
+		 * current client is already focused, activate the new  *
+		 * surface. Otherwise, prevent focus stealing...        */
+		client = wl_resource_get_client(shsurf->surface->resource);
+		ws = get_current_workspace(shsurf->shell);
+		wl_list_for_each(state, &ws->focus_list, link) {
+			if (state->keyboard_focus) {
+				surface = weston_surface_get_main_surface(state->keyboard_focus);
+				if (client != wl_resource_get_client(surface->resource))
+					goto prevent_focus_steal;
+			}
+		}
 		wl_list_for_each(seat, &compositor->seat_list, link)
 			activate(shell, shsurf->surface, seat, true);
+		break;
+		/* ... by making sure that the client owning the surface *
+		 * has not been started more than 5 seconds ago          */
+prevent_focus_steal:
+		time = weston_compositor_get_time();
+		wl_list_for_each(weston_client, &compositor->client_list, link) {
+			if (weston_client->client != client)
+				continue;
+			if (time - weston_client->connection_time <= 5000) {
+				wl_list_for_each(seat, &compositor->seat_list, link)
+					activate(shell, shsurf->surface, seat, true);
+			} else {
+				/* do not focus, but make a notification for attention  */
+				managed_surface_send_presented(shsurf->managed_surface_resource);
+			}
+		}
 		break;
 	case SHELL_SURFACE_POPUP:
 	case SHELL_SURFACE_NONE:

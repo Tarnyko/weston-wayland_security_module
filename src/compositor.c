@@ -4161,7 +4161,15 @@ compositor_bind(struct wl_client *client,
 		void *data, uint32_t version, uint32_t id)
 {
 	struct weston_compositor *compositor = data;
+	struct weston_client *weston_client;
 	struct wl_resource *resource;
+
+	weston_client = zalloc(sizeof *weston_client);
+	weston_client->client = client;
+	weston_client->connection_time = weston_compositor_get_time();
+
+	wl_list_insert(compositor->client_list.prev,
+		       &weston_client->link);
 
 	resource = wl_resource_create(client, &wl_compositor_interface,
 				      MIN(version, 3), id);
@@ -4272,6 +4280,7 @@ weston_compositor_init(struct weston_compositor *ec,
 	wl_list_init(&ec->layer_list);
 	wl_list_init(&ec->seat_list);
 	wl_list_init(&ec->output_list);
+	wl_list_init(&ec->client_list);
 	wl_list_init(&ec->key_binding_list);
 	wl_list_init(&ec->modifier_binding_list);
 	wl_list_init(&ec->button_binding_list);
@@ -4328,15 +4337,22 @@ weston_compositor_init(struct weston_compositor *ec,
 WL_EXPORT void
 weston_compositor_shutdown(struct weston_compositor *ec)
 {
-	struct weston_output *output, *next;
+	struct weston_output *output, *o_next;
+	struct weston_client *client, *c_next;
 
 	wl_event_source_remove(ec->idle_source);
 	if (ec->input_loop_source)
 		wl_event_source_remove(ec->input_loop_source);
 
 	/* Destroy all outputs associated with this compositor */
-	wl_list_for_each_safe(output, next, &ec->output_list, link)
+	wl_list_for_each_safe(output, o_next, &ec->output_list, link)
 		output->destroy(output);
+
+	/* Destroy all clients associated with this compositor */
+	wl_list_for_each_safe(client, c_next, &ec->client_list, link) {
+		client->client = NULL;
+		wl_list_remove(&client->link);	
+	}
 
 	if (ec->renderer)
 		ec->renderer->destroy(ec);

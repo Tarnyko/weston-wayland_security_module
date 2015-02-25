@@ -62,6 +62,7 @@ struct weston_buffer;
 struct shell_surface;
 struct weston_seat;
 struct weston_output;
+struct weston_client;
 struct input_method;
 
 enum weston_keyboard_modifier {
@@ -241,6 +242,12 @@ struct weston_output {
 			  uint16_t *b);
 
 	struct weston_timeline_object timeline;
+};
+
+struct weston_client {
+	struct wl_client *client;
+	uint32_t connection_time;
+	struct wl_list link;
 };
 
 struct weston_pointer_grab;
@@ -635,6 +642,7 @@ struct weston_compositor {
 	struct weston_layer fade_layer;
 	struct weston_layer cursor_layer;
 
+	struct wl_list client_list;
 	struct wl_list output_list;
 	struct wl_list seat_list;
 	struct wl_list layer_list;
