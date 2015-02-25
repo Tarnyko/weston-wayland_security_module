@@ -362,6 +362,13 @@
 
     <request name="set_minimized" />
 
+    <request name="present">
+      <description summary="the window needs attention from the user">
+        Tells the shell to issue an interactive GUI notification,
+        with which the user can interact to bring the surface back.
+      </description>
+    </request>
+
     <event name="close">
       <description summary="surface wants to be closed">
         The close event is sent by the compositor when the user

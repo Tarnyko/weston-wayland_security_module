@@ -117,6 +117,61 @@
       </description>
     </request>
 
+    <!-- Version 4 additions -->
+
+    <event name="add_managed_surface" since="4">
+      <description summary="tell the client to manage a new surface">
+	Tell the shell client to create a new managed surface object.
+      </description>
+      <arg name="id" type="new_id" interface="managed_surface"/>
+      <arg name="title" type="string" allow-null="true"/>
+    </event>
+
+  </interface>
+
+  <interface name="managed_surface" version="1">
+    <description summary="interface for handling managed surfaces">
+      A managed surface is an abstraction for a shell surface which
+      might send events requiring shell feedback, and also for which
+      user interaction might send requests back.
+    </description>
+
+    <request name="activate">
+      <description summary="a managed surface wants to activate">
+        This request means that a user interaction such as clicking
+        on a notification tooltip has activated a managed surface,
+        and that the corresponding shell surface should react
+        accordingly.
+      </description>
+    </request>
+
+    <event name="presented">
+      <description summary="a managed surface needs attention">
+        This event will be sent immediately after a "present"
+        request has been issued on the corresponding shell surface.
+ 
+        A tooltip will be drawn on the panel, specifying the title
+        of the involved shell surface. Clicking on this tooltip will
+        send the "activate" request back to the shell surface.
+      </description>
+    </event>
+
+    <event name="title_changed">
+      <description summary="a managed surface has a new title">
+        This event will be sent immediately after the title of the
+        corresponding shell surface has been changed.
+      </description>
+      <arg name="title" type="string" allow-null="true"/>
+    </event>
+
+    <event name="removed">
+      <description summary="a managed surface has been removed">
+        This event will be sent immediately after the shell surface
+        corresponding to the managed surface object has been destroyed.
+      </description>
+    </event>
+
+    <request name="destroy" type="destructor" />
   </interface>
 
   <interface name="screensaver" version="1">

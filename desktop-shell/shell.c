@@ -105,6 +105,7 @@ struct shell_client;
 
 struct shell_surface {
 	struct wl_resource *resource;
+	struct wl_resource *managed_surface_resource;
 	struct wl_signal destroy_signal;
 	struct shell_client *owner;
 
@@ -2245,6 +2246,8 @@ set_title(struct shell_surface *shsurf, const char *title)
 	free(shsurf->title);
 	shsurf->title = strdup(title);
 	shsurf->surface->timeline.force_refresh = 1;
+
+	managed_surface_send_title_changed(shsurf->managed_surface_resource, title);
 }
 
 static void
@@ -3470,11 +3473,35 @@ static const struct wl_shell_surface_interface shell_surface_implementation = {
 };
 
 static void
+managed_surface_activate(struct wl_client *client,
+			 struct wl_resource *resource)
+{
+	struct shell_surface *shsurf = wl_resource_get_user_data(resource);
+
+	/* show the surface (will be implemented in the next patch) */
+	/* the surface will be moved to the current workspace and raised */
+}
+
+static void
+managed_surface_destroy(struct wl_client *client,
+			struct wl_resource *resource)
+{
+	wl_resource_destroy(resource);
+}
+
+static const struct managed_surface_interface managed_surface_implementation = {
+	managed_surface_activate,
+	managed_surface_destroy
+};
+
+static void
 destroy_shell_surface(struct shell_surface *shsurf)
 {
 	struct shell_surface *child, *next;
 
 	wl_signal_emit(&shsurf->destroy_signal, shsurf);
+
+	managed_surface_send_removed(shsurf->managed_surface_resource);
 
 	if (!wl_list_empty(&shsurf->popup.grab_link)) {
 		remove_popup_grab(shsurf);
@@ -3578,6 +3605,7 @@ create_common_surface(struct shell_client *owner, void *shell,
 		      const struct weston_shell_client *client)
 {
 	struct shell_surface *shsurf;
+	struct wl_client *shell_client;
 
 	assert(surface->configure == NULL);
 
@@ -3615,6 +3643,17 @@ create_common_surface(struct shell_client *owner, void *shell,
 	wl_list_init(&shsurf->fullscreen.transform.link);
 
 	shsurf->output = get_default_output(shsurf->shell->compositor);
+
+	shell_client = wl_resource_get_client(shsurf->shell->child.desktop_shell);
+	shsurf->managed_surface_resource =
+		wl_resource_create(shell_client,
+				   &managed_surface_interface, 1, 0);
+	wl_resource_set_implementation(shsurf->managed_surface_resource,
+				       &managed_surface_implementation,
+				       shsurf, NULL);
+	desktop_shell_send_add_managed_surface(shsurf->shell->child.desktop_shell,
+					       shsurf->managed_surface_resource,
+					       shsurf->title);
 
 	wl_signal_init(&shsurf->destroy_signal);
 	shsurf->surface_destroy_listener.notify = shell_handle_surface_destroy;
@@ -3884,6 +3923,16 @@ xdg_surface_set_minimized(struct wl_client *client,
 	set_minimized(shsurf->surface, 1);
 }
 
+static void
+xdg_surface_present(struct wl_client *client,
+		     struct wl_resource *resource)
+{
+	struct shell_surface *shsurf = wl_resource_get_user_data(resource);
+
+	if (shsurf->type == SHELL_SURFACE_TOPLEVEL)
+		managed_surface_send_presented(shsurf->managed_surface_resource);
+}
+
 static const struct xdg_surface_interface xdg_surface_implementation = {
 	xdg_surface_destroy,
 	xdg_surface_set_parent,
@@ -3899,6 +3948,7 @@ static const struct xdg_surface_interface xdg_surface_implementation = {
 	xdg_surface_set_fullscreen,
 	xdg_surface_unset_fullscreen,
 	xdg_surface_set_minimized,
+	xdg_surface_present
 };
 
 static void

@@ -56,6 +56,7 @@ struct desktop {
 	struct unlock_dialog *unlock_dialog;
 	struct task unlock_task;
 	struct wl_list outputs;
+	struct wl_list managed_surfaces;
 
 	struct window *grab_window;
 	struct widget *grab_widget;
@@ -103,6 +104,12 @@ struct output {
 
 	struct panel *panel;
 	struct background *background;
+};
+
+struct managed_surf {
+	struct managed_surface *surface;
+	char *title;
+	struct wl_list link;
 };
 
 struct panel_launcher {
@@ -942,6 +949,50 @@ unlock_dialog_finish(struct task *task, uint32_t events)
 }
 
 static void
+managed_surface_presented(void *data,
+			   struct managed_surface *surface)
+{
+	/* GUI notification tooltip (will be implemented in the next patch) */
+	/* will call "managed_surface_activate()" if the user clicks on it */
+}
+
+static void
+managed_surface_title_changed(void *data,
+			      struct managed_surface *surface,
+			      const char *title)
+{
+	struct managed_surf *managed_surf = data;
+
+	if (managed_surf->title)
+		free(managed_surf->title);
+
+	if (title)
+		managed_surf->title = strdup(title);
+	else
+		managed_surf->title = NULL;
+}
+
+static void
+managed_surface_removed(void *data,
+			struct managed_surface *surface)
+{
+	struct managed_surf *managed_surf = data;
+
+	managed_surface_destroy(managed_surf->surface);
+	if (managed_surf->title)
+		free(managed_surf->title);
+	wl_list_remove(&managed_surf->link);
+
+	free(managed_surf);
+}
+
+static const struct managed_surface_listener managed_surface_listener = {
+	managed_surface_presented,
+	managed_surface_title_changed,
+	managed_surface_removed
+};
+
+static void
 desktop_shell_configure(void *data,
 			struct desktop_shell *desktop_shell,
 			uint32_t edges,
@@ -1018,10 +1069,34 @@ desktop_shell_grab_cursor(void *data,
 	}
 }
 
+static void
+desktop_shell_add_managed_surface(void *data,
+				  struct desktop_shell *desktop_shell,
+				  struct managed_surface *surface,
+				  const char *title)
+{
+	struct desktop *desktop = data;
+	struct managed_surf *managed_surf;
+
+	managed_surf = xzalloc(sizeof *managed_surf);
+	managed_surf->surface = surface;
+	if (title)
+		managed_surf->title = strdup(title);
+	else
+		managed_surf->title = NULL;
+
+	wl_list_insert(desktop->managed_surfaces.prev, &managed_surf->link);
+
+	managed_surface_add_listener(surface,
+				     &managed_surface_listener, managed_surf);
+
+}
+
 static const struct desktop_shell_listener listener = {
 	desktop_shell_configure,
 	desktop_shell_prepare_lock_surface,
-	desktop_shell_grab_cursor
+	desktop_shell_grab_cursor,
+	desktop_shell_add_managed_surface
 };
 
 static void
@@ -1331,6 +1406,8 @@ int main(int argc, char *argv[])
 
 	desktop.unlock_task.run = unlock_dialog_finish;
 	wl_list_init(&desktop.outputs);
+
+	wl_list_init(&desktop.managed_surfaces);
 
 	desktop.config = weston_config_parse("weston.ini");
 	s = weston_config_get_section(desktop.config, "shell", NULL, NULL);
