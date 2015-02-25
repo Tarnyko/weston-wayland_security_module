@@ -3478,8 +3478,7 @@ managed_surface_activate(struct wl_client *client,
 {
 	struct shell_surface *shsurf = wl_resource_get_user_data(resource);
 
-	/* show the surface (will be implemented in the next patch) */
-	/* the surface will be moved to the current workspace and raised */
+	set_minimized(shsurf->surface, 0);
 }
 
 static void
