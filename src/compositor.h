@@ -244,9 +244,16 @@ struct weston_output {
 	struct weston_timeline_object timeline;
 };
 
+struct weston_event {
+	uint32_t serial;
+	uint32_t time;
+	struct wl_list link;
+};
+
 struct weston_client {
 	struct wl_client *client;
 	uint32_t connection_time;
+	struct wl_list event_list;
 	struct wl_list link;
 };
 

@@ -366,7 +366,16 @@
       <description summary="the window needs attention from the user">
         Tells the shell to issue an interactive GUI notification,
         with which the user can interact to bring the surface back.
+
+        If a serial other than 0 is provided (0 is unlikely because
+        serials are continuousty incremented from various events),
+	then it must be a serial returned from wl_pointer, wl_keyboard
+        or wl_touch events. Within a same client, the shell will use
+        this as a hint to determine the delay between a user action
+        and the request on a given shell surface, and thus if it
+        should issue a notification instead of focusing the surface.
       </description>
+      <arg name="serial" type="uint" summary="serial from an input event, can be 0"/>
     </request>
 
     <event name="close">

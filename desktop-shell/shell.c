@@ -3924,12 +3924,40 @@ xdg_surface_set_minimized(struct wl_client *client,
 
 static void
 xdg_surface_present(struct wl_client *client,
-		     struct wl_resource *resource)
+		     struct wl_resource *resource,
+		     uint32_t serial)
 {
 	struct shell_surface *shsurf = wl_resource_get_user_data(resource);
+	struct weston_compositor *compositor = shsurf->shell->compositor;
+	struct weston_client *weston_client;
+	struct weston_event *event;
+	struct weston_seat *seat;
+	uint32_t time;
 
-	if (shsurf->type == SHELL_SURFACE_TOPLEVEL)
-		managed_surface_send_presented(shsurf->managed_surface_resource);
+	if (shsurf->type == SHELL_SURFACE_TOPLEVEL) {
+		if (serial == 0) {
+			managed_surface_send_presented(shsurf->managed_surface_resource);
+		} else {
+			/* if a serial != 0 was sent, we look for the time it was issued for this client. *
+			 * If this was longer than 2 seconds ago, give a notification for the surface ;
+			 * otherwise, focus it */
+			wl_list_for_each(weston_client, &compositor->client_list, link) {
+				if (weston_client->client == client) {
+					wl_list_for_each(event, &weston_client->event_list, link) {
+						if (event->serial == serial) {
+							time = weston_compositor_get_time();
+							if (time - event->time <= 2000) {
+								wl_list_for_each(seat, &compositor->seat_list, link)
+									activate(shsurf->shell, shsurf->surface, seat, true);
+							} else {
+								managed_surface_send_presented(shsurf->managed_surface_resource);
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 }
 
 static const struct xdg_surface_interface xdg_surface_implementation = {

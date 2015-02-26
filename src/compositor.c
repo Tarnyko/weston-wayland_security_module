@@ -4167,6 +4167,7 @@ compositor_bind(struct wl_client *client,
 	weston_client = zalloc(sizeof *weston_client);
 	weston_client->client = client;
 	weston_client->connection_time = weston_compositor_get_time();
+	wl_list_init(&weston_client->event_list);
 
 	wl_list_insert(compositor->client_list.prev,
 		       &weston_client->link);
@@ -4339,6 +4340,7 @@ weston_compositor_shutdown(struct weston_compositor *ec)
 {
 	struct weston_output *output, *o_next;
 	struct weston_client *client, *c_next;
+	struct weston_event *event, *e_next;
 
 	wl_event_source_remove(ec->idle_source);
 	if (ec->input_loop_source)
@@ -4350,6 +4352,9 @@ weston_compositor_shutdown(struct weston_compositor *ec)
 
 	/* Destroy all clients associated with this compositor */
 	wl_list_for_each_safe(client, c_next, &ec->client_list, link) {
+		wl_list_for_each_safe(event, e_next, &client->event_list, link) {
+			wl_list_remove(&event->link);
+		}
 		client->client = NULL;
 		wl_list_remove(&client->link);	
 	}

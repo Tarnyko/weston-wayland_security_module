@@ -189,8 +189,10 @@ default_grab_pointer_button(struct weston_pointer_grab *grab,
 	struct weston_pointer *pointer = grab->pointer;
 	struct weston_compositor *compositor = pointer->seat->compositor;
 	struct weston_view *view;
+	struct weston_client *client;
+	struct weston_event *event;
 	struct wl_resource *resource;
-	uint32_t serial;
+	uint32_t serial, real_time;
 	enum wl_pointer_button_state state = state_w;
 	struct wl_display *display = compositor->wl_display;
 	wl_fixed_t sx, sy;
@@ -199,12 +201,24 @@ default_grab_pointer_button(struct weston_pointer_grab *grab,
 	resource_list = &pointer->focus_resource_list;
 	if (!wl_list_empty(resource_list)) {
 		serial = wl_display_next_serial(display);
-		wl_resource_for_each(resource, resource_list)
+		real_time = weston_compositor_get_time();
+		wl_resource_for_each(resource, resource_list) {
+			wl_list_for_each(client, &compositor->client_list, link) {
+				if (client->client == wl_resource_get_client(resource)) {
+					if (state_w != WL_POINTER_BUTTON_STATE_RELEASED)
+						break;
+					event = zalloc(sizeof *event);
+					event->serial = serial;
+					event->time = real_time;
+					wl_list_insert(client->event_list.prev, &event->link);
+				}
+			}
 			wl_pointer_send_button(resource,
 					       serial,
 					       time,
 					       button,
 					       state_w);
+		}
 	}
 
 	if (pointer->button_count == 0 &&
