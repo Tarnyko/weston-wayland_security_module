@@ -317,6 +317,29 @@ shell_surface_is_top_fullscreen(struct shell_surface *shsurf)
 	return (shsurf == get_shell_surface(top_fs_ev->surface));
 }
 
+static bool
+shell_surface_is_fullscreen_allowed(struct shell_surface *shsurf,
+				    struct wl_client *client)
+{
+#ifdef HAVE_LIBWSM
+	struct desktop_shell *shell = shsurf->shell;
+	struct wsm_client_t *wsm_client;
+	enum wsm_decision_t wsm_decision;
+
+	wsm_client = wsm_client_create(shell->security_module, client);
+	wsm_decision = wsm_client_get_permission(wsm_client, "WSM_FULLSCREEN", NULL);
+	wsm_client_destroy(wsm_client);
+
+	if ((wsm_decision == WSM_DECISION_DENY) ||
+	    (wsm_decision == WSM_DECISION_SOFT_DENY))
+		return false;
+	else
+		return true;
+#else
+	return true;
+#endif
+}
+
 static void
 destroy_shell_grab_shsurf(struct wl_listener *listener, void *data)
 {
@@ -2566,6 +2589,9 @@ shell_surface_set_fullscreen(struct wl_client *client,
 	struct shell_surface *shsurf = wl_resource_get_user_data(resource);
 	struct weston_output *output;
 
+	if (!shell_surface_is_fullscreen_allowed(shsurf, client))
+		return;
+
 	if (output_resource)
 		output = wl_resource_get_user_data(output_resource);
 	else
@@ -3876,6 +3902,9 @@ xdg_surface_set_fullscreen(struct wl_client *client,
 {
 	struct shell_surface *shsurf = wl_resource_get_user_data(resource);
 	struct weston_output *output;
+
+	if (!shell_surface_is_fullscreen_allowed(shsurf, client))
+		return;
 
 	shsurf->state_requested = true;
 	shsurf->requested_state.fullscreen = true;
@@ -6618,6 +6647,10 @@ shell_destroy(struct wl_listener *listener, void *data)
 	struct workspace **ws;
 	struct shell_output *shell_output, *tmp;
 
+#ifdef HAVE_LIBWSM
+	wsm_destroy(shell->security_module);
+#endif
+
 	/* Force state to unlocked so we don't try to fade */
 	shell->locked = false;
 
@@ -6844,6 +6877,10 @@ module_init(struct weston_compositor *ec,
 	shell->child.deathstamp = weston_compositor_get_time();
 
 	shell->panel_position = DESKTOP_SHELL_PANEL_POSITION_TOP;
+
+#ifdef HAVE_LIBWSM
+	shell->security_module = wsm_create();
+#endif
 
 	setup_output_destroy_handler(ec, shell);
 
