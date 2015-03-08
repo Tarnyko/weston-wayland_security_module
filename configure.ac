@@ -379,6 +379,25 @@ AM_CONDITIONAL(BUILD_FULL_GL_CLIENTS,
 AM_CONDITIONAL(BUILD_SUBSURFACES_CLIENT,
 	       [test '(' "x$have_cairo_egl" != "xyes" -o "x$cairo_modules" = "xcairo-glesv2" ')' -a "x$enable_simple_egl_clients" = "xyes"])
 
+AC_ARG_ENABLE(libwsm,
+              AS_HELP_STRING([--enable-libwsm],
+                             [build with Wayland Security Module support]),,
+              enable_libwsm=no)
+AM_CONDITIONAL(HAVE_LIBWSM, [test "x$enable_libwsm" = xyes])
+if test "x$enable_libwsm" != "xno"; then
+        PKG_CHECK_MODULES(LIBWSM,
+                          libwsm,
+                          have_libwsm=yes,
+                          have_libwsm=no)
+        if test "x$have_libwsm" = "xno" -a "x$enable_libwsm" = "xyes"; then
+          AC_MSG_ERROR([Wayland Security Module support explicitly requested, but libwsm couldn't be found])
+        fi
+        if test "x$have_libwsm" = "xyes"; then
+             enable_libwsm=yes
+             AC_DEFINE(HAVE_LIBWSM, 1, [Have Wayland Security Module support])
+        fi
+fi
+
 AM_CONDITIONAL(ENABLE_DESKTOP_SHELL, true)
 
 AC_ARG_ENABLE(fullscreen-shell,
@@ -530,6 +549,7 @@ AC_MSG_RESULT([
 	Build wcap utility		${enable_wcap_tools}
 	Build Fullscreen Shell		${enable_fullscreen_shell}
 
+	WSM support 			${enable_libwsm}
 	weston-launch utility		${enable_weston_launch}
 	systemd-login support		${have_systemd_login}
 
