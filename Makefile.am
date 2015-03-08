@@ -732,8 +732,8 @@ desktop_shell_la_CPPFLAGS =			\
 	-DIN_WESTON
 
 desktop_shell_la_LDFLAGS = -module -avoid-version
-desktop_shell_la_LIBADD = $(COMPOSITOR_LIBS) libshared.la
-desktop_shell_la_CFLAGS = $(GCC_CFLAGS) $(COMPOSITOR_CFLAGS)
+desktop_shell_la_LIBADD = $(LIBWSM_LIBS) $(COMPOSITOR_LIBS) libshared.la
+desktop_shell_la_CFLAGS = $(GCC_CFLAGS) $(LIBWSM_CFLAGS) $(COMPOSITOR_CFLAGS)
 desktop_shell_la_SOURCES =				\
 	desktop-shell/shell.h				\
 	desktop-shell/shell.c				\

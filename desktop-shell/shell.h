@@ -25,6 +25,10 @@
 #include <stdbool.h>
 #include <time.h>
 
+#ifdef HAVE_LIBWSM
+#include <libwsm.h>
+#endif
+
 #include "compositor.h"
 
 #include "desktop-shell-server-protocol.h"
@@ -208,6 +212,10 @@ struct desktop_shell {
 	struct wl_list output_list;
 
 	enum desktop_shell_panel_position panel_position;
+
+#ifdef HAVE_LIBWSM
+	struct wsm_t *security_module;
+#endif
 
 	char *client;
 
