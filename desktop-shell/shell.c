@@ -251,6 +251,9 @@ surface_rotate(struct shell_surface *surface, struct weston_seat *seat);
 static void
 shell_fade_startup(struct desktop_shell *shell);
 
+static void
+lock(struct desktop_shell *shell);
+
 static struct shell_seat *
 get_shell_seat(struct weston_seat *seat);
 
@@ -330,11 +333,24 @@ shell_surface_is_fullscreen_allowed(struct shell_surface *shsurf,
 	wsm_decision = wsm_client_get_permission(wsm_client, "WSM_FULLSCREEN", NULL);
 	wsm_client_destroy(wsm_client);
 
-	if ((wsm_decision == WSM_DECISION_DENY) ||
-	    (wsm_decision == WSM_DECISION_SOFT_DENY))
-		return false;
-	else
-		return true;
+	switch (wsm_decision) {
+		case WSM_DECISION_DENY:
+		case WSM_DECISION_SOFT_DENY:
+			managed_surface_send_notified(shsurf->managed_surface_resource,
+										  DESKTOP_SHELL_NOTIFICATION_TYPE_NONE,
+										  "Surface asked to become fullscreen, "
+										  "but WSM policy prevented it");
+			return false;
+		case WSM_DECISION_SOFT_ALLOW:
+			managed_surface_send_notified(shsurf->managed_surface_resource,
+										  DESKTOP_SHELL_NOTIFICATION_TYPE_FULLSCREEN,
+										  "Surface asked to become fullscreen, "
+										  "do you want to allow it ?");
+			return false;
+		case WSM_DECISION_ALLOW:
+		default:
+			return true;
+	}
 #else
 	return true;
 #endif
@@ -4619,6 +4635,41 @@ desktop_shell_set_panel_position(struct wl_client *client,
 	shell->panel_position = position;
 }
 
+static void
+desktop_shell_lock(struct wl_client *client,
+		     struct wl_resource *resource)
+{
+	struct desktop_shell *shell = wl_resource_get_user_data(resource);
+
+	if (!shell->locked)
+		lock(shell);
+}
+
+static void
+desktop_shell_notify(struct wl_client *client,
+		     struct wl_resource *resource,
+			 struct wl_resource *managed_surface_resource,
+			 uint32_t type, uint32_t value)
+{
+	struct shell_surface *shsurf =
+		wl_resource_get_user_data(managed_surface_resource);
+	struct weston_output *output;
+
+	if (!value)
+		return;
+
+	if (type == DESKTOP_SHELL_NOTIFICATION_TYPE_FULLSCREEN) {
+		shsurf->state_requested = true;
+		shsurf->requested_state.fullscreen = true;
+
+		output = get_focused_output(shsurf->surface->compositor);
+		shell_surface_set_output(shsurf, output);
+		shsurf->fullscreen_output = shsurf->output;
+
+		send_configure_for_surface(shsurf);
+	}
+}
+
 static const struct desktop_shell_interface desktop_shell_implementation = {
 	desktop_shell_set_background,
 	desktop_shell_set_panel,
@@ -4626,7 +4677,9 @@ static const struct desktop_shell_interface desktop_shell_implementation = {
 	desktop_shell_unlock,
 	desktop_shell_set_grab_surface,
 	desktop_shell_desktop_ready,
-	desktop_shell_set_panel_position
+	desktop_shell_set_panel_position,
+	desktop_shell_lock,
+	desktop_shell_notify
 };
 
 static enum shell_surface_type

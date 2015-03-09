@@ -54,6 +54,7 @@ struct desktop {
 	struct desktop_shell *shell;
 	uint32_t interface_version;
 	struct unlock_dialog *unlock_dialog;
+	struct notify_dialog *notify_dialog;
 	struct task unlock_task;
 	struct wl_list outputs;
 	struct wl_list managed_surfaces;
@@ -67,6 +68,8 @@ struct desktop {
 	enum cursor_type grab_cursor;
 
 	int painted;
+
+	struct managed_surf *active_managed_surf;
 };
 
 struct surface {
@@ -130,6 +133,8 @@ struct panel_notifier {
 	struct panel *panel;
 	int visible;
 	char *title;
+	char *message;
+	uint32_t type;
 	struct managed_surf *managed_surf;
 	struct wl_list link;
 };
@@ -141,6 +146,15 @@ struct panel_clock {
 	int clock_fd;
 };
 
+struct notify_dialog;
+
+struct dialog_button {
+	struct widget *widget;
+	int focused, pressed;
+	char *caption;
+	struct notify_dialog *dialog;
+};
+
 struct unlock_dialog {
 	struct window *window;
 	struct widget *widget;
@@ -150,8 +164,20 @@ struct unlock_dialog {
 	struct desktop *desktop;
 };
 
+struct notify_dialog {
+	struct window *window;
+	struct widget *widget;
+	struct dialog_button *button_y;
+	struct dialog_button *button_n;
+	//struct managed_surf *managed_surf;
+	struct desktop *desktop;
+};
+
 static void
 panel_add_launchers(struct panel *panel, struct desktop *desktop);
+
+static struct notify_dialog *
+notify_dialog_create(struct desktop *desktop);
 
 static void
 sigchild_handler(int s)
@@ -381,6 +407,8 @@ static void
 panel_destroy_notifier(struct panel_notifier *notifier)
 {
 	free(notifier->title);
+	if (notifier->message)
+		free(notifier->message);
 
 	widget_destroy(notifier->widget);
 	wl_list_remove(&notifier->link);
@@ -394,9 +422,17 @@ static void
 panel_notifier_activate(struct panel_notifier *notifier)
 {
 	struct managed_surface *surface;
+	struct desktop *desktop;
 
 	surface = notifier->managed_surf->surface;
-	managed_surface_activate(surface);
+	desktop = notifier->managed_surf->desktop;
+
+	if (notifier->type != DESKTOP_SHELL_NOTIFICATION_TYPE_NONE) {
+		desktop->active_managed_surf = notifier->managed_surf;
+		desktop_shell_lock(desktop->shell);
+	} else {
+		managed_surface_activate(surface);
+	}
 
 	panel_destroy_notifier(notifier);
 }
@@ -464,8 +500,32 @@ panel_notifier_redraw_handler(struct widget *widget, void *data)
 	cairo_destroy(cr);
 }
 
+static int
+panel_notifier_motion_handler(struct widget *widget, struct input *input,
+			      uint32_t time, float x, float y, void *data)
+{
+	struct panel_notifier *notifier = data;
+	cairo_text_extents_t extents;
+	cairo_t *cr;
+
+	if (!notifier->message)
+		return CURSOR_LEFT_PTR;
+
+	cr = widget_cairo_create(widget);
+	cairo_text_extents(cr, notifier->message, &extents);
+	widget_set_tooltip(widget, (char *)notifier->message,
+					   x - extents.width, y);
+	cairo_destroy(cr);
+
+	return CURSOR_LEFT_PTR;
+}
+
+
 static void
-panel_add_notifier(struct panel *panel, struct managed_surf *managed_surf)
+panel_add_notifier(struct panel *panel,
+				   struct managed_surf *managed_surf,
+				   const char *message,
+				   uint32_t type)
 {
 	struct panel_notifier *notifier;
 
@@ -473,6 +533,9 @@ panel_add_notifier(struct panel *panel, struct managed_surf *managed_surf)
 	notifier->managed_surf = managed_surf;
 	notifier->visible = 0;
 	notifier->panel = panel;
+	if (message)
+		notifier->message = strdup(message);
+	notifier->type = type;
 
 	wl_list_insert(panel->notifier_list.prev, &notifier->link);
 
@@ -483,6 +546,8 @@ panel_add_notifier(struct panel *panel, struct managed_surf *managed_surf)
 				    panel_notifier_touch_up_handler);
 	widget_set_redraw_handler(notifier->widget,
 				  panel_notifier_redraw_handler);
+	widget_set_motion_handler(notifier->widget,
+				  panel_notifier_motion_handler);
 }
 
 static void
@@ -1075,8 +1140,8 @@ unlock_dialog_create(struct desktop *desktop)
 	widget_set_touch_up_handler(dialog->button,
 				      unlock_dialog_touch_up_handler);
 
-	desktop_shell_set_lock_surface(desktop->shell,
-				       window_get_wl_surface(dialog->window));
+	//desktop_shell_set_lock_surface(desktop->shell,
+	//			       window_get_wl_surface(dialog->window));
 
 	window_schedule_resize(dialog->window, 260, 230);
 
@@ -1099,6 +1164,188 @@ unlock_dialog_finish(struct task *task, uint32_t events)
 	desktop_shell_unlock(desktop->shell);
 	unlock_dialog_destroy(desktop->unlock_dialog);
 	desktop->unlock_dialog = NULL;
+}
+
+static int
+dialog_button_enter_handler(struct widget *widget, struct input *input,
+							float x, float y, void *data)
+{
+	struct dialog_button *button = data;
+
+	button->focused = 1;
+	widget_schedule_redraw(widget);
+
+	return CURSOR_LEFT_PTR;
+}
+
+static void
+dialog_button_leave_handler(struct widget *widget, struct input *input,
+							void *data)
+{
+	struct dialog_button *button = data;
+
+	button->focused = 0;
+	widget_schedule_redraw(widget);
+}
+
+static void
+dialog_button_button_handler(struct widget *widget, struct input *input,
+						    uint32_t time, uint32_t button,
+							enum wl_pointer_button_state state, void *data)
+{
+	struct dialog_button *d_button = data;
+	struct desktop *desktop = d_button->dialog->desktop;
+
+	widget_schedule_redraw(widget);
+	if (state == WL_POINTER_BUTTON_STATE_RELEASED) {
+			desktop_shell_unlock(desktop->shell);
+			if (!strcmp(d_button->caption, "Yes"))
+				desktop_shell_notify(desktop->shell, desktop->active_managed_surf->surface,
+									 DESKTOP_SHELL_NOTIFICATION_TYPE_FULLSCREEN, 1);
+	}
+}
+
+static void
+dialog_button_redraw_handler(struct widget *widget, void *data)
+{
+	struct dialog_button *button = data;
+	struct rectangle allocation;
+	cairo_t *cr;
+	cairo_text_extents_t extents;
+
+	widget_get_allocation(widget, &allocation);
+	if (button->pressed) {
+		allocation.x++;
+		allocation.y++;
+	}
+
+	cr = widget_cairo_create(button->dialog->widget);
+	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+	cairo_rectangle(cr, allocation.x, allocation.y,
+				    allocation.width, allocation.height);
+	if (button->focused)
+		cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+	else
+		cairo_set_source_rgb(cr, 0.9, 0.9, 0.9);
+	cairo_fill(cr);
+	cairo_set_line_width(cr, 1);
+	cairo_rectangle(cr, allocation.x, allocation.y,
+				    allocation.width, allocation.height);
+	cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
+	cairo_stroke_preserve(cr);
+	cairo_select_font_face(cr, "sans", CAIRO_FONT_SLANT_NORMAL,
+						               CAIRO_FONT_WEIGHT_NORMAL);
+	cairo_set_font_size(cr, 14);
+	cairo_text_extents(cr, button->caption, &extents);
+	cairo_move_to (cr, allocation.x + (allocation.width - extents.width)/2,
+				       allocation.y + (allocation.height - extents.height)/2 + 10);
+	cairo_show_text(cr, button->caption);
+
+	cairo_destroy(cr);
+}	
+
+static struct dialog_button *
+dialog_button_add(struct widget *widget,
+				  const char *caption,
+				  void *data)
+{
+	struct notify_dialog *dialog = data;
+	struct dialog_button *button;
+
+	button = xzalloc(sizeof *button);
+	button->dialog = dialog;
+	button->caption = strdup(caption);
+
+	button->widget = widget_add_widget(dialog->widget, button);
+	widget_set_enter_handler(button->widget,
+							 dialog_button_enter_handler);
+	widget_set_leave_handler(button->widget,
+							 dialog_button_leave_handler);
+	widget_set_button_handler(button->widget,
+							 dialog_button_button_handler);
+	widget_set_redraw_handler(button->widget,
+							 dialog_button_redraw_handler);
+
+	return button;
+}
+
+static void
+notify_dialog_keyboard_focus_handler(struct window *window,
+										 struct input *device, void *data)
+{
+	window_schedule_redraw(window);
+}
+
+static void
+notify_dialog_redraw_handler(struct widget *widget, void *data)
+{
+	struct notify_dialog *dialog = data;
+	struct rectangle allocation;
+	cairo_surface_t *surface;
+	cairo_t *cr;
+
+	cr = widget_cairo_create(widget);
+
+	widget_get_allocation(dialog->widget, &allocation);
+	cairo_rectangle(cr, allocation.x, allocation.y,
+					allocation.width, allocation.height);
+	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+	cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.5);
+	cairo_fill(cr);
+
+	cairo_destroy(cr);
+
+	surface = window_get_surface(dialog->window);
+	cairo_surface_destroy(surface);
+}
+
+static void
+notify_dialog_resize_handler(struct widget *widget,
+								 int32_t width, int32_t height, void *data)
+{
+	struct notify_dialog *dialog = data;
+	struct rectangle allocation;
+
+	widget_get_allocation(dialog->widget, &allocation);
+
+	widget_set_allocation(dialog->button_y->widget, allocation.x + (width - 2*60)/2 - 10,
+						                            allocation.y + height - 32*2,
+						                            60, 32);
+	widget_set_allocation(dialog->button_n->widget, allocation.x + (width - 2*60)/2 + 80 - 10,
+	                                                allocation.y + height - 32*2,
+						                            60, 32);
+}
+
+static struct notify_dialog *
+notify_dialog_create(struct desktop *desktop)
+{
+	struct display *display = desktop->display;
+	struct notify_dialog *dialog;
+
+	dialog = xzalloc(sizeof *dialog);
+	//dialog->managed_surf = NULL;
+	//dialog->desktop = desktop;
+
+	dialog->window = window_create_custom(display);
+	dialog->widget = window_frame_create(dialog->window, dialog);
+	window_set_title(dialog->window, "Allow surface to switch fullscreen ?");
+
+	window_set_user_data(dialog->window, dialog);
+	window_set_keyboard_focus_handler(dialog->window,
+					  notify_dialog_keyboard_focus_handler);
+	dialog->button_y = dialog_button_add(dialog->widget, "Yes", dialog);
+	dialog->button_n = dialog_button_add(dialog->widget, "No", dialog);
+	widget_set_redraw_handler(dialog->widget,
+				  notify_dialog_redraw_handler);
+	widget_set_resize_handler(dialog->widget,
+				  notify_dialog_resize_handler);
+
+	desktop_shell_set_lock_surface(desktop->shell,
+				       window_get_wl_surface(dialog->window));
+
+	window_schedule_resize(dialog->window, 520, 230);
+
+	return dialog;
 }
 
 static void
@@ -1126,13 +1373,60 @@ search_notifier:
 		}
 
 		if (!found) {
-			panel_add_notifier(panel, managed_surf);
+			panel_add_notifier(panel, managed_surf, NULL,
+							   DESKTOP_SHELL_NOTIFICATION_TYPE_NONE);
 			goto search_notifier;
 		} else if (!found->visible) {
 			if (managed_surf->title)
 				found->title = strdup(managed_surf->title);
 			else
 				found->title = strdup("<Default>");
+			found->visible = 1;
+			widget_schedule_redraw(found->widget);
+			update_window(panel->window);
+		}
+	}
+
+}
+
+static void
+managed_surface_notified(void *data,
+			   struct managed_surface *surface,
+			   uint32_t type,
+			   const char *message)
+{
+	struct managed_surf *managed_surf = data;
+	struct desktop *desktop;
+	struct output *output;
+	struct panel *panel;
+	struct panel_notifier *notifier, *found;
+
+	desktop = managed_surf->desktop;
+
+	wl_list_for_each(output, &desktop->outputs, link) {
+		if (!output->panel)
+			continue;
+		panel = output->panel;
+		found = NULL;
+search_notifier:
+		wl_list_for_each(notifier, &panel->notifier_list, link) {
+			if (notifier->managed_surf != managed_surf)
+				continue;
+			found = notifier;
+		}
+
+		if (!found) {
+			panel_add_notifier(panel, managed_surf, message, type);
+			goto search_notifier;
+		} else if (!found->visible) {
+			if (managed_surf->title)
+				found->title = strdup(managed_surf->title);
+			else
+				found->title = strdup("<Default>");
+			if (found->message)
+				free(found->message);
+			found->message = strdup(message);
+			found->type = type;
 			found->visible = 1;
 			widget_schedule_redraw(found->widget);
 			update_window(panel->window);
@@ -1192,6 +1486,7 @@ managed_surface_removed(void *data,
 
 static const struct managed_surface_listener managed_surface_listener = {
 	managed_surface_presented,
+	managed_surface_notified,
 	managed_surface_title_changed,
 	managed_surface_removed
 };
@@ -1223,6 +1518,11 @@ desktop_shell_prepare_lock_surface(void *data,
 	if (!desktop->unlock_dialog) {
 		desktop->unlock_dialog = unlock_dialog_create(desktop);
 		desktop->unlock_dialog->desktop = desktop;
+	}
+
+	if (!desktop->notify_dialog) {
+		desktop->notify_dialog = notify_dialog_create(desktop);
+		desktop->notify_dialog->desktop = desktop;
 	}
 }
 
@@ -1293,7 +1593,8 @@ desktop_shell_add_managed_surface(void *data,
 
 	wl_list_for_each(output, &desktop->outputs, link) {
 		if (output->panel)
-			panel_add_notifier(output->panel, managed_surf);
+			panel_add_notifier(output->panel, managed_surf, NULL,
+							   DESKTOP_SHELL_NOTIFICATION_TYPE_FULLSCREEN);
 	}
 
 	wl_list_insert(desktop->managed_surfaces.prev, &managed_surf->link);

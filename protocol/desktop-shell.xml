@@ -127,6 +127,19 @@
       <arg name="title" type="string" allow-null="true"/>
     </event>
 
+   <enum name="notification_type">
+      <entry name="none" value="0"/>
+      <entry name="fullscreen" value="1"/>
+    </enum>
+
+  <request name="lock"/>
+
+   <request name="notify">
+      <arg name="surface" type="object" interface="managed_surface"/>
+      <arg name="type" type="uint"/>
+      <arg name="choice" type="uint"/>
+   </request>
+
   </interface>
 
   <interface name="managed_surface" version="1">
@@ -153,6 +166,21 @@
         A tooltip will be drawn on the panel, specifying the title
         of the involved shell surface. Clicking on this tooltip will
         send the "activate" request back to the shell surface.
+      </description>
+    </event>
+
+    <event name="notified">
+      <description summary="a managed surface got a notification">
+        This event may happen due to a shell decision, mostly
+        related to Wayland Security Module policies.
+ 
+        A tooltip will be drawn on the panel, specifying the title
+        of the involved shell surface. Hovering this tooltip with
+        the pointer will show a smaller floating tooltip containing
+        the message, and clicking on it will start an action related
+        to the type of the notification.
+      <arg name="type" type="uint"/>
+      <arg name="message" type="string"/>
       </description>
     </event>
 
